@@ -1287,7 +1287,7 @@ fn collect_const<'tcx>(
                 collect_miri(tcx, id, output);
             }
         }
-        ty::ConstKind::Unevaluated(def_id, substs) => {
+        ty::ConstKind::Unevaluated(def_id, substs, promoted) => {
             let instance = ty::Instance::resolve(tcx,
                                                 param_env,
                                                 def_id,
@@ -1295,7 +1295,7 @@ fn collect_const<'tcx>(
 
             let cid = GlobalId {
                 instance,
-                promoted: None,
+                promoted,
             };
             match tcx.const_eval(param_env.and(cid)) {
                 Ok(val) => collect_const(tcx, val, param_substs, output),

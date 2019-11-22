@@ -582,7 +582,7 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
         let val_val = match val.val {
             ty::ConstKind::Param(_) =>
                 throw_inval!(TooGeneric),
-            ty::ConstKind::Unevaluated(def_id, substs) => {
+            ty::ConstKind::Unevaluated(def_id, substs, promoted) => {
                 let instance = self.resolve(def_id, substs)?;
                 let param_env = if self.tcx.is_static(def_id) {
                     ty::ParamEnv::reveal_all()
@@ -591,7 +591,7 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
                 };
                 let val = self.tcx.const_eval(param_env.and(GlobalId {
                     instance,
-                    promoted: None,
+                    promoted,
                 }))?;
                 // "recurse". This is only ever going into a recusion depth of 1, because after
                 // `const_eval` we don't have `Unevaluated` anymore.

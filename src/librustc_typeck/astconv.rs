@@ -2281,6 +2281,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             val: ty::ConstKind::Unevaluated(
                 def_id,
                 InternalSubsts::identity_for_item(tcx, def_id),
+                None,
             ),
             ty,
         };

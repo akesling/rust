@@ -110,7 +110,9 @@ pub trait Qualif {
             Operand::Constant(ref constant) => {
                 if let Some(static_) = constant.check_static_ptr(cx.tcx) {
                     Self::in_static(cx, static_)
-                } else if let ty::ConstKind::Unevaluated(def_id, _) = constant.literal.val {
+                } else if let ty::ConstKind::Unevaluated(def_id, _, promoted) = constant.literal.val
+                {
+                    assert!(promoted.is_none());
                     // Don't peek inside trait associated constants.
                     if cx.tcx.trait_of_item(def_id).is_some() {
                         Self::in_any_value_of_ty(cx, constant.literal.ty)
