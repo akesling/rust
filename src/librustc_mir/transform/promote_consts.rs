@@ -1042,17 +1042,32 @@ impl<'a, 'tcx> Promoter<'a, 'tcx> {
                 Candidate::Repeat(loc) => {
                     let ref mut statement = blocks[loc.block].statements[loc.statement_index];
                     match statement.kind {
-                        StatementKind::Assign(box(_, Rvalue::Repeat(ref mut operand, _))) => {
+                        StatementKind::Assign(box (_, Rvalue::Repeat(ref mut operand, _))) => {
                             let ty = operand.ty(local_decls, self.tcx);
                             let span = statement.source_info.span;
-                            Rvalue::Use(mem::replace(
-                                operand,
-                                Operand::Copy(promoted_place(ty, span))
-                            ))
+
+                            promoted.span = span;
+                            promoted.local_decls[RETURN_PLACE] =
+                                LocalDecl::new_return_place(ty, span);
+
+                            let promoted_operand = Operand::Constant(Box::new(Constant {
+                                span,
+                                user_ty: None,
+                                literal: tcx.mk_const(ty::Const {
+                                    ty,
+                                    val: ty::ConstKind::Unevaluated(
+                                        def_id,
+                                        InternalSubsts::identity_for_item(tcx, def_id),
+                                        Some(promoted_id),
+                                    ),
+                                }),
+                            }));
+
+                            Rvalue::Use(mem::replace(operand, promoted_operand))
                         }
-                        _ => bug!()
+                        _ => bug!(),
                     }
-                },
+                }
                 Candidate::Argument { bb, index } => {
                     let terminator = blocks[bb].terminator_mut();
                     match terminator.kind {
