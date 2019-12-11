@@ -950,6 +950,23 @@ impl<'a, 'tcx> Promoter<'a, 'tcx> {
             let promoted = &mut self.promoted;
             let promoted_id = Promoted::new(next_promoted_id);
             let tcx = self.tcx;
+            let mut promoted_operand = |ty, span| {
+                promoted.span = span;
+                promoted.local_decls[RETURN_PLACE] = LocalDecl::new_return_place(ty, span);
+
+                Operand::Constant(Box::new(Constant {
+                    span,
+                    user_ty: None,
+                    literal: tcx.mk_const(ty::Const {
+                        ty,
+                        val: ty::ConstKind::Unevaluated(
+                            def_id,
+                            InternalSubsts::identity_for_item(tcx, def_id),
+                            Some(promoted_id),
+                        ),
+                    }),
+                }))
+            };
             let (blocks, local_decls) = self.source.basic_blocks_and_local_decls_mut();
             match candidate {
                 Candidate::Ref(loc) => {
@@ -968,10 +985,6 @@ impl<'a, 'tcx> Promoter<'a, 'tcx> {
                                 ty::TypeAndMut { ty, mutbl: borrow_kind.to_mutbl_lossy() },
                             );
 
-                            promoted.span = span;
-                            promoted.local_decls[RETURN_PLACE] =
-                                LocalDecl::new_return_place(ref_ty, span);
-
                             *region = tcx.lifetimes.re_static;
 
                             let mut projection = vec![PlaceElem::Deref];
@@ -986,24 +999,11 @@ impl<'a, 'tcx> Promoter<'a, 'tcx> {
                             let promoted_ref = local_decls.push(promoted_ref);
                             assert_eq!(self.temps.push(TempState::Unpromotable), promoted_ref);
 
-                            let promoted_ref_rvalue =
-                                Rvalue::Use(Operand::Constant(Box::new(Constant {
-                                    span,
-                                    user_ty: None,
-                                    literal: tcx.mk_const(ty::Const {
-                                        ty: ref_ty,
-                                        val: ty::ConstKind::Unevaluated(
-                                            def_id,
-                                            InternalSubsts::identity_for_item(tcx, def_id),
-                                            Some(promoted_id),
-                                        ),
-                                    }),
-                                })));
                             let promoted_ref_statement = Statement {
                                 source_info: statement.source_info,
                                 kind: StatementKind::Assign(Box::new((
                                     Place::from(promoted_ref),
-                                    promoted_ref_rvalue,
+                                    Rvalue::Use(promoted_operand(ref_ty, span)),
                                 ))),
                             };
                             self.extra_statements.push((loc, promoted_ref_statement));
@@ -1030,24 +1030,7 @@ impl<'a, 'tcx> Promoter<'a, 'tcx> {
                             let ty = operand.ty(local_decls, self.tcx);
                             let span = statement.source_info.span;
 
-                            promoted.span = span;
-                            promoted.local_decls[RETURN_PLACE] =
-                                LocalDecl::new_return_place(ty, span);
-
-                            let promoted_operand = Operand::Constant(Box::new(Constant {
-                                span,
-                                user_ty: None,
-                                literal: tcx.mk_const(ty::Const {
-                                    ty,
-                                    val: ty::ConstKind::Unevaluated(
-                                        def_id,
-                                        InternalSubsts::identity_for_item(tcx, def_id),
-                                        Some(promoted_id),
-                                    ),
-                                }),
-                            }));
-
-                            Rvalue::Use(mem::replace(operand, promoted_operand))
+                            Rvalue::Use(mem::replace(operand, promoted_operand(ty, span)))
                         }
                         _ => bug!(),
                     }
@@ -1059,24 +1042,7 @@ impl<'a, 'tcx> Promoter<'a, 'tcx> {
                             let ty = args[index].ty(local_decls, self.tcx);
                             let span = terminator.source_info.span;
 
-                            promoted.span = span;
-                            promoted.local_decls[RETURN_PLACE] =
-                                LocalDecl::new_return_place(ty, span);
-
-                            let promoted_operand = Operand::Constant(Box::new(Constant {
-                                span,
-                                user_ty: None,
-                                literal: tcx.mk_const(ty::Const {
-                                    ty,
-                                    val: ty::ConstKind::Unevaluated(
-                                        def_id,
-                                        InternalSubsts::identity_for_item(tcx, def_id),
-                                        Some(promoted_id),
-                                    ),
-                                }),
-                            }));
-
-                            Rvalue::Use(mem::replace(&mut args[index], promoted_operand))
+                            Rvalue::Use(mem::replace(&mut args[index], promoted_operand(ty, span)))
                         }
                         // We expected a `TerminatorKind::Call` for which we'd like to promote an
                         // argument. `qualify_consts` saw a `TerminatorKind::Call` here, but
@@ -1093,10 +1059,10 @@ impl<'a, 'tcx> Promoter<'a, 'tcx> {
         };
 
         assert_eq!(self.new_block(), START_BLOCK);
-        self.visit_rvalue(&mut rvalue, Location {
-            block: BasicBlock::new(0),
-            statement_index: usize::MAX
-        });
+        self.visit_rvalue(
+            &mut rvalue,
+            Location { block: BasicBlock::new(0), statement_index: usize::MAX },
+        );
 
         let span = self.promoted.span;
         self.assign(RETURN_PLACE, rvalue, span);
