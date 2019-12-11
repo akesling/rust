@@ -9,7 +9,7 @@ use rustc::lint::builtin::{MUTABLE_BORROW_RESERVATION_CONFLICT};
 use rustc::mir::{AggregateKind, BasicBlock, BorrowCheckResult, BorrowKind};
 use rustc::mir::{
     ClearCrossCrate, Local, Location, Body, BodyAndCache, Mutability, Operand, Place, PlaceBase,
-    PlaceElem, PlaceRef, ReadOnlyBodyAndCache, Static, StaticKind, read_only
+    PlaceElem, PlaceRef, ReadOnlyBodyAndCache, Static, read_only
 };
 use rustc::mir::{Field, ProjectionElem, Promoted, Rvalue, Statement, StatementKind};
 use rustc::mir::{Terminator, TerminatorKind};
@@ -2181,7 +2181,6 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
             }
             PlaceRef {
                 base: PlaceBase::Static(box Static {
-                    kind: StaticKind::Static,
                     def_id,
                     ..
                 }),

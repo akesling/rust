@@ -220,7 +220,7 @@ pub trait Machine<'mir, 'tcx>: Sized {
         frame.locals[local].access()
     }
 
-    /// Called before a `StaticKind::Static` value is accessed.
+    /// Called before a `Static` value is accessed.
     fn before_access_static(
         _allocation: &Allocation,
     ) -> InterpResult<'tcx> {

@@ -468,7 +468,6 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             mir::PlaceRef {
                 base: mir::PlaceBase::Static(box mir::Static {
                     ty,
-                    kind: mir::StaticKind::Static,
                     def_id,
                 }),
                 projection: [],

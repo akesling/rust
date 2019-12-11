@@ -7,7 +7,7 @@ use rustc::hir::GeneratorKind;
 use rustc::mir::{
     AggregateKind, Constant, Field, Local, LocalInfo, LocalKind, Location, Operand,
     Place, PlaceBase, PlaceRef, ProjectionElem, Rvalue, Statement, StatementKind,
-    Static, StaticKind, Terminator, TerminatorKind,
+    Static, Terminator, TerminatorKind,
 };
 use rustc::ty::{self, DefIdTree, Ty, TyCtxt};
 use rustc::ty::layout::VariantIdx;
@@ -177,7 +177,6 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
             PlaceRef {
                 base:
                     PlaceBase::Static(box Static {
-                        kind: StaticKind::Static,
                         def_id,
                         ..
                     }),
