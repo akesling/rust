@@ -2,7 +2,7 @@ use rustc_index::vec::Idx;
 use rustc::middle::lang_items;
 use rustc::ty::{self, Ty, TypeFoldable, Instance};
 use rustc::ty::layout::{self, LayoutOf, HasTyCtxt, FnAbiExt};
-use rustc::mir::{self, PlaceBase, Static, StaticKind};
+use rustc::mir;
 use rustc::mir::interpret::PanicInfo;
 use rustc_target::abi::call::{ArgAbi, FnAbi, PassMode};
 use rustc_target::spec::abi::Abi;
@@ -627,36 +627,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                         // The shuffle array argument is usually not an explicit constant,
                         // but specified directly in the code. This means it gets promoted
                         // and we can then extract the value by evaluating the promoted.
-                        mir::Operand::Copy(place) | mir::Operand::Move(place) => {
-                            if let mir::PlaceRef {
-                                base:
-                                    &PlaceBase::Static(box Static {
-                                        kind: StaticKind::Promoted(promoted, _),
-                                        ty,
-                                        def_id: _,
-                                    }),
-                                projection: &[],
-                            } = place.as_ref()
-                            {
-                                let param_env = ty::ParamEnv::reveal_all();
-                                let cid = mir::interpret::GlobalId {
-                                    instance: self.instance,
-                                    promoted: Some(promoted),
-                                };
-                                let c = bx.tcx().const_eval(param_env.and(cid));
-                                let (llval, ty) = self.simd_shuffle_indices(
-                                    &bx,
-                                    terminator.source_info.span,
-                                    ty,
-                                    c,
-                                );
-                                return OperandRef {
-                                    val: Immediate(llval),
-                                    layout: bx.layout_of(ty),
-                                };
-                            } else {
-                                span_bug!(span, "shuffle indices must be constant");
-                            }
+                        mir::Operand::Copy(_place) | mir::Operand::Move(_place) => {
                         }
 
                         mir::Operand::Constant(constant) => {
