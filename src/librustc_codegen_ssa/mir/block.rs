@@ -623,32 +623,23 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 // checked by const-qualification, which also
                 // promotes any complex rvalues to constants.
                 if i == 2 && intrinsic.unwrap().starts_with("simd_shuffle") {
-                    match arg {
-                        // The shuffle array argument is usually not an explicit constant,
-                        // but specified directly in the code. This means it gets promoted
-                        // and we can then extract the value by evaluating the promoted.
-                        mir::Operand::Copy(_place) | mir::Operand::Move(_place) => {
-                        }
-
-                        mir::Operand::Constant(constant) => {
-                            let c = self.eval_mir_constant(constant);
-                            let (llval, ty) = self.simd_shuffle_indices(
-                                &bx,
-                                constant.span,
-                                constant.literal.ty,
-                                c,
-                            );
-                            return OperandRef {
-                                val: Immediate(llval),
-                                layout: bx.layout_of(ty)
-                            };
-                        }
+                    if let mir::Operand::Constant(constant) = arg {
+                        let c = self.eval_mir_constant(constant);
+                        let (llval, ty) = self.simd_shuffle_indices(
+                            &bx,
+                            constant.span,
+                            constant.literal.ty,
+                            c,
+                        );
+                        return OperandRef {
+                            val: Immediate(llval),
+                            layout: bx.layout_of(ty)
+                        };
                     }
                 }
 
                 self.codegen_operand(&mut bx, arg)
             }).collect();
-
 
             bx.codegen_intrinsic_call(*instance.as_ref().unwrap(), &fn_abi, &args, dest,
                                       terminator.source_info.span);
