@@ -1125,7 +1125,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             }
         } else {
             self.codegen_place(bx, &mir::PlaceRef {
-                base: &dest.base,
+                local: &dest.local,
                 projection: &dest.projection,
             })
         };

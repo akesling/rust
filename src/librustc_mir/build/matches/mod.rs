@@ -930,7 +930,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                     let proj_base = &source.projection[..i];
 
                     fake_borrows.insert(Place {
-                        base: source.base.clone(),
+                        local: source.local.clone(),
                         projection: self.hir.tcx().intern_place_elems(proj_base),
                     });
                 }
@@ -1285,7 +1285,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                     // projections the borrow of prefix_cursor will
                     // conflict with any mutation of base.
                     all_fake_borrows.push(PlaceRef {
-                        base: &place.base,
+                        local: &place.local,
                         projection: proj_base,
                     });
                 }
@@ -1302,7 +1302,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
 
         all_fake_borrows.into_iter().map(|matched_place| {
             let fake_borrow_deref_ty = Place::ty_from(
-                matched_place.base,
+                matched_place.local,
                 matched_place.projection,
                 &self.local_decls,
                 tcx,
@@ -1470,7 +1470,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                     re_erased,
                     BorrowKind::Shallow,
                     Place {
-                        base: place.base.clone(),
+                        local: place.local.clone(),
                         projection: tcx.intern_place_elems(place.projection),
                     },
                 );

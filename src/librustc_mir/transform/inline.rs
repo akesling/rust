@@ -438,9 +438,7 @@ impl Inliner<'tcx> {
                         }
                     }
 
-                    match place.base {
-                        _ => false
-                    }
+                    false
                 }
 
                 let dest = if dest_needs_borrow(&destination.0) {

@@ -8,7 +8,7 @@ use rustc::hir::HirId;
 use rustc::hir::def::DefKind;
 use rustc::hir::def_id::DefId;
 use rustc::mir::{
-    AggregateKind, Constant, Location, Place, PlaceBase, Body, BodyAndCache, Operand, Local, UnOp,
+    AggregateKind, Constant, Location, Place, Body, BodyAndCache, Operand, Local, UnOp,
     Rvalue, StatementKind, Statement, LocalKind, TerminatorKind, Terminator, ClearCrossCrate,
     SourceInfo, BinOp, SourceScope, SourceScopeData, LocalDecl, BasicBlock, ReadOnlyBodyAndCache,
     read_only, RETURN_PLACE
@@ -884,10 +884,8 @@ impl<'mir, 'tcx> MutVisitor<'tcx> for ConstPropagator<'mir, 'tcx> {
                         // doesn't use the invalid value
                         match cond {
                             Operand::Move(ref place) | Operand::Copy(ref place) => {
-                                match place.base {
-                                    PlaceBase::Local(local) => self.remove_const(local),
-                                }
-                            },
+                                self.remove_const(place.local);
+                            }
                             Operand::Constant(_) => {}
                         }
                         let span = terminator.source_info.span;

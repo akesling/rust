@@ -2,7 +2,7 @@ use crate::borrow_check::ArtificialField;
 use crate::borrow_check::Overlap;
 use crate::borrow_check::{Deep, Shallow, AccessDepth};
 use rustc::hir;
-use rustc::mir::{Body, BorrowKind, Place, PlaceBase, PlaceElem, PlaceRef, ProjectionElem};
+use rustc::mir::{Body, BorrowKind, Local, Place, PlaceElem, PlaceRef, ProjectionElem};
 use rustc::ty::{self, TyCtxt};
 use std::cmp::max;
 
@@ -127,10 +127,10 @@ fn place_components_conflict<'tcx>(
     //    and either equal or disjoint.
     //  - If we did run out of access, the borrow can access a part of it.
 
-    let borrow_base = &borrow_place.base;
-    let access_base = access_place.base;
+    let borrow_local = &borrow_place.local;
+    let access_local = access_place.local;
 
-    match place_base_conflict(borrow_base, access_base) {
+    match place_base_conflict(borrow_local, access_local) {
         Overlap::Arbitrary => {
             bug!("Two base can't return Arbitrary");
         }
@@ -169,7 +169,7 @@ fn place_components_conflict<'tcx>(
         match place_projection_conflict(
             tcx,
             body,
-            borrow_base,
+            borrow_local,
             borrow_proj_base,
             borrow_c,
             access_c,
@@ -216,7 +216,7 @@ fn place_components_conflict<'tcx>(
             // access cares about.
 
             let proj_base = &borrow_place.projection[..access_place.projection.len() + i];
-            let base_ty = Place::ty_from(borrow_base, proj_base, body, tcx).ty;
+            let base_ty = Place::ty_from(borrow_local, proj_base, body, tcx).ty;
 
             match (elem, &base_ty.kind, access) {
                 (_, _, Shallow(Some(ArtificialField::ArrayLength)))
@@ -304,21 +304,17 @@ fn place_components_conflict<'tcx>(
 // or disjoint (and have the same type!), return the overlap situation
 // between `elem1` and `elem2`.
 fn place_base_conflict(
-    elem1: &PlaceBase,
-    elem2: &PlaceBase,
+    l1: &Local,
+    l2: &Local,
 ) -> Overlap {
-    match (elem1, elem2) {
-        (PlaceBase::Local(l1), PlaceBase::Local(l2)) => {
-            if l1 == l2 {
-                // the same local - base case, equal
-                debug!("place_element_conflict: DISJOINT-OR-EQ-LOCAL");
-                Overlap::EqualOrDisjoint
-            } else {
-                // different locals - base case, disjoint
-                debug!("place_element_conflict: DISJOINT-LOCAL");
-                Overlap::Disjoint
-            }
-        }
+    if l1 == l2 {
+        // the same local - base case, equal
+        debug!("place_element_conflict: DISJOINT-OR-EQ-LOCAL");
+        Overlap::EqualOrDisjoint
+    } else {
+        // different locals - base case, disjoint
+        debug!("place_element_conflict: DISJOINT-LOCAL");
+        Overlap::Disjoint
     }
 }
 
@@ -328,7 +324,7 @@ fn place_base_conflict(
 fn place_projection_conflict<'tcx>(
     tcx: TyCtxt<'tcx>,
     body: &Body<'tcx>,
-    pi1_base: &PlaceBase,
+    pi1_local: &Local,
     pi1_proj_base: &[PlaceElem<'tcx>],
     pi1_elem: &PlaceElem<'tcx>,
     pi2_elem: &PlaceElem<'tcx>,
@@ -346,7 +342,7 @@ fn place_projection_conflict<'tcx>(
                 debug!("place_element_conflict: DISJOINT-OR-EQ-FIELD");
                 Overlap::EqualOrDisjoint
             } else {
-                let ty = Place::ty_from(pi1_base, pi1_proj_base, body, tcx).ty;
+                let ty = Place::ty_from(pi1_local, pi1_proj_base, body, tcx).ty;
                 match ty.kind {
                     ty::Adt(def, _) if def.is_union() => {
                         // Different fields of a union, we are basically stuck.

@@ -126,11 +126,8 @@ impl<'tcx> Visitor<'tcx> for TransferFunction<'_, '_, 'tcx> {
     ) {
         if let mir::Rvalue::Ref(_, kind, ref borrowed_place) = *rvalue {
             if self.borrow_allows_mutation(kind, borrowed_place) {
-                match borrowed_place.base {
-                    mir::PlaceBase::Local(borrowed_local) if !borrowed_place.is_indirect()
-                        => self.trans.gen(borrowed_local),
-
-                    _ => (),
+                if !borrowed_place.is_indirect() {
+                    self.trans.gen(borrowed_place.local);
                 }
             }
         }

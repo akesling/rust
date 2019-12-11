@@ -46,12 +46,12 @@ pub trait Qualif {
     ) -> bool {
         if let [proj_base @ .., elem] = place.projection {
             let base_qualif = Self::in_place(cx, per_local, PlaceRef {
-                base: place.base,
+                local: place.local,
                 projection: proj_base,
             });
             let qualif = base_qualif && Self::in_any_value_of_ty(
                 cx,
-                Place::ty_from(place.base, proj_base, *cx.body, cx.tcx)
+                Place::ty_from(place.local, proj_base, *cx.body, cx.tcx)
                     .projection_ty(cx.tcx, elem)
                     .ty,
             );
@@ -84,11 +84,11 @@ pub trait Qualif {
     ) -> bool {
         match place {
             PlaceRef {
-                base: PlaceBase::Local(local),
+                local,
                 projection: [],
             } => per_local(*local),
             PlaceRef {
-                base: _,
+                local: _,
                 projection: [.., _],
             } => Self::in_projection(cx, per_local, place),
         }
@@ -152,10 +152,10 @@ pub trait Qualif {
             Rvalue::Ref(_, _, ref place) | Rvalue::AddressOf(_, ref place) => {
                 // Special-case reborrows to be more like a copy of the reference.
                 if let [proj_base @ .., ProjectionElem::Deref] = place.projection.as_ref() {
-                    let base_ty = Place::ty_from(&place.base, proj_base, *cx.body, cx.tcx).ty;
+                    let base_ty = Place::ty_from(&place.local, proj_base, *cx.body, cx.tcx).ty;
                     if let ty::Ref(..) = base_ty.kind {
                         return Self::in_place(cx, per_local, PlaceRef {
-                            base: &place.base,
+                            local: &place.local,
                             projection: proj_base,
                         });
                     }

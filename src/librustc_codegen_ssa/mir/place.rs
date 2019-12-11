@@ -436,10 +436,10 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
 
         let result = match place_ref {
             mir::PlaceRef {
-                base: mir::PlaceBase::Local(index),
+                local,
                 projection: [],
             } => {
-                match self.locals[*index] {
+                match self.locals[**local] {
                     LocalRef::Place(place) => {
                         return place;
                     }
@@ -452,22 +452,22 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 }
             }
             mir::PlaceRef {
-                base,
+                local,
                 projection: [proj_base @ .., mir::ProjectionElem::Deref],
             } => {
                 // Load the pointer from its location.
                 self.codegen_consume(bx, &mir::PlaceRef {
-                    base,
+                    local,
                     projection: proj_base,
                 }).deref(bx.cx())
             }
             mir::PlaceRef {
-                base,
+                local,
                 projection: [proj_base @ .., elem],
             } => {
                 // FIXME turn this recursion into iteration
                 let cg_base = self.codegen_place(bx, &mir::PlaceRef {
-                    base,
+                    local,
                     projection: proj_base,
                 });
 
@@ -531,7 +531,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
     pub fn monomorphized_place_ty(&self, place_ref: &mir::PlaceRef<'_, 'tcx>) -> Ty<'tcx> {
         let tcx = self.cx.tcx();
         let place_ty = mir::Place::ty_from(
-            place_ref.base,
+            place_ref.local,
             place_ref.projection,
             *self.mir,
             tcx,

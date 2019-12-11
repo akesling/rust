@@ -402,9 +402,7 @@ impl<'tcx> MutVisitor<'tcx> for LocalUpdater<'tcx> {
                     self.map[*l].is_some()
                 }
                 StatementKind::Assign(box (place, _)) => {
-                    match place.base {
-                        PlaceBase::Local(local) => self.map[local].is_some()
-                    }
+                    self.map[place.local].is_some()
                 }
                 _ => true
             }

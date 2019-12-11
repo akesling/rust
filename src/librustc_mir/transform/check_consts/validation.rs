@@ -340,8 +340,8 @@ impl Visitor<'tcx> for Validator<'_, 'mir, 'tcx> {
                             MutatingUseContext::Borrow,
                         ),
                     };
-                    self.visit_place_base(&place.base, ctx, location);
-                    self.visit_projection(&place.base, reborrowed_proj, ctx, location);
+                    self.visit_place_base(&place.local, ctx, location);
+                    self.visit_projection(&place.local, reborrowed_proj, ctx, location);
                     return;
                 }
             }
@@ -355,8 +355,8 @@ impl Visitor<'tcx> for Validator<'_, 'mir, 'tcx> {
                             MutatingUseContext::AddressOf,
                         ),
                     };
-                    self.visit_place_base(&place.base, ctx, location);
-                    self.visit_projection(&place.base, reborrowed_proj, ctx, location);
+                    self.visit_place_base(&place.local, ctx, location);
+                    self.visit_projection(&place.local, reborrowed_proj, ctx, location);
                     return;
                 }
             }
@@ -450,21 +450,17 @@ impl Visitor<'tcx> for Validator<'_, 'mir, 'tcx> {
 
     fn visit_place_base(
         &mut self,
-        place_base: &PlaceBase,
+        place_local: &Local,
         context: PlaceContext,
         location: Location,
     ) {
         trace!(
-            "visit_place_base: place_base={:?} context={:?} location={:?}",
-            place_base,
+            "visit_place_base: place_local={:?} context={:?} location={:?}",
+            place_local,
             context,
             location,
         );
-        self.super_place_base(place_base, context, location);
-
-        match place_base {
-            PlaceBase::Local(_) => {}
-        }
+        self.super_place_base(place_local, context, location);
     }
 
     fn visit_operand(
@@ -481,30 +477,30 @@ impl Visitor<'tcx> for Validator<'_, 'mir, 'tcx> {
     }
     fn visit_projection_elem(
         &mut self,
-        place_base: &PlaceBase,
+        place_local: &Local,
         proj_base: &[PlaceElem<'tcx>],
         elem: &PlaceElem<'tcx>,
         context: PlaceContext,
         location: Location,
     ) {
         trace!(
-            "visit_projection_elem: place_base={:?} proj_base={:?} elem={:?} \
+            "visit_projection_elem: place_local={:?} proj_base={:?} elem={:?} \
             context={:?} location={:?}",
-            place_base,
+            place_local,
             proj_base,
             elem,
             context,
             location,
         );
 
-        self.super_projection_elem(place_base, proj_base, elem, context, location);
+        self.super_projection_elem(place_local, proj_base, elem, context, location);
 
         match elem {
             ProjectionElem::Deref => {
-                let base_ty = Place::ty_from(place_base, proj_base, *self.body, self.tcx).ty;
+                let base_ty = Place::ty_from(place_local, proj_base, *self.body, self.tcx).ty;
                 if let ty::RawPtr(_) = base_ty.kind {
                     if proj_base.is_empty() {
-                        if let (PlaceBase::Local(local), []) = (place_base, proj_base) {
+                        if let (local, []) = (place_local, proj_base) {
                             let decl = &self.body.local_decls[*local];
                             if let LocalInfo::StaticRef { def_id, .. } = decl.local_info {
                                 let span = decl.source_info.span;
@@ -525,7 +521,7 @@ impl Visitor<'tcx> for Validator<'_, 'mir, 'tcx> {
             ProjectionElem::Subslice {..} |
             ProjectionElem::Field(..) |
             ProjectionElem::Index(_) => {
-                let base_ty = Place::ty_from(place_base, proj_base, *self.body, self.tcx).ty;
+                let base_ty = Place::ty_from(place_local, proj_base, *self.body, self.tcx).ty;
                 match base_ty.ty_adt_def() {
                     Some(def) if def.is_union() => {
                         self.check_op(ops::UnionAccess);
@@ -714,18 +710,15 @@ fn place_as_reborrow(
 
             // A borrow of a `static` also looks like `&(*_1)` in the MIR, but `_1` is a `const`
             // that points to the allocation for the static. Don't treat these as reborrows.
-            match place.base {
-                PlaceBase::Local(local) => 
-                    if body.local_decls[local].is_ref_to_static() {
-                        return None;
-                    }
+            if body.local_decls[place.local].is_ref_to_static() {
+                return None;
             }
 
             // Ensure the type being derefed is a reference and not a raw pointer.
             //
             // This is sufficient to prevent an access to a `static mut` from being marked as a
             // reborrow, even if the check above were to disappear.
-            let inner_ty = Place::ty_from(&place.base, inner, body, tcx).ty;
+            let inner_ty = Place::ty_from(&place.local, inner, body, tcx).ty;
             match inner_ty.kind {
                 ty::Ref(..) => Some(inner),
                 _ => None,

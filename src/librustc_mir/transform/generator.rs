@@ -126,13 +126,13 @@ impl<'tcx> MutVisitor<'tcx> for DerefArgVisitor<'tcx> {
                     place: &mut Place<'tcx>,
                     context: PlaceContext,
                     location: Location) {
-        if place.base == PlaceBase::Local(self_arg()) {
+        if place.local == self_arg() {
             replace_base(place, Place {
-                base: PlaceBase::Local(self_arg()),
+                local: self_arg(),
                 projection: self.tcx().intern_place_elems(&vec![ProjectionElem::Deref]),
             }, self.tcx);
         } else {
-            self.visit_place_base(&mut place.base, context, location);
+            self.visit_place_base(&mut place.local, context, location);
 
             for elem in place.projection.iter() {
                 if let PlaceElem::Index(local) = elem {
@@ -161,11 +161,11 @@ impl<'tcx> MutVisitor<'tcx> for PinArgVisitor<'tcx> {
     }
 
     fn visit_place(&mut self, place: &mut Place<'tcx>, context: PlaceContext, location: Location) {
-        if place.base == PlaceBase::Local(self_arg()) {
+        if place.local == self_arg() {
             replace_base(
                 place,
                 Place {
-                    base: PlaceBase::Local(self_arg()),
+                    local: self_arg(),
                     projection: self.tcx().intern_place_elems(&vec![ProjectionElem::Field(
                             Field::new(0),
                             self.ref_gen_ty,
@@ -174,7 +174,7 @@ impl<'tcx> MutVisitor<'tcx> for PinArgVisitor<'tcx> {
                 self.tcx,
             );
         } else {
-            self.visit_place_base(&mut place.base, context, location);
+            self.visit_place_base(&mut place.local, context, location);
 
             for elem in place.projection.iter() {
                 if let PlaceElem::Index(local) = elem {
@@ -186,7 +186,7 @@ impl<'tcx> MutVisitor<'tcx> for PinArgVisitor<'tcx> {
 }
 
 fn replace_base<'tcx>(place: &mut Place<'tcx>, new_base: Place<'tcx>, tcx: TyCtxt<'tcx>) {
-    place.base = new_base.base;
+    place.local = new_base.local;
 
     let mut new_projection = new_base.projection.to_vec();
     new_projection.append(&mut place.projection.to_vec());
@@ -250,7 +250,7 @@ impl TransformVisitor<'tcx> {
         projection.push(ProjectionElem::Field(Field::new(idx), ty));
 
         Place {
-            base: base.base,
+            local: base.local,
             projection: self.tcx.intern_place_elems(&projection),
         }
     }
@@ -300,12 +300,9 @@ impl MutVisitor<'tcx> for TransformVisitor<'tcx> {
         _context: PlaceContext,
         _location: Location,
     ) {
-        match place.base {
-            PlaceBase::Local(l) => 
-                // Replace an Local in the remap with a generator struct access
-                if let Some(&(ty, variant_index, idx)) = self.remap.get(&l) {
-                    replace_base(place, self.make_field(variant_index, idx, ty), self.tcx);
-                }
+        // Replace an Local in the remap with a generator struct access
+        if let Some(&(ty, variant_index, idx)) = self.remap.get(&place.local) {
+            replace_base(place, self.make_field(variant_index, idx, ty), self.tcx);
         }
     }
 

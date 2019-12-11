@@ -11,7 +11,7 @@ use super::MirBorrowckCtxt;
 
 use rustc::hir;
 use rustc::ty::{self, TyCtxt};
-use rustc::mir::{Place, PlaceBase, PlaceRef, ProjectionElem, ReadOnlyBodyAndCache};
+use rustc::mir::{Place, PlaceRef, ProjectionElem, ReadOnlyBodyAndCache};
 
 pub trait IsPrefixOf<'cx, 'tcx> {
     fn is_prefix_of(&self, other: PlaceRef<'cx, 'tcx>) -> bool;
@@ -19,7 +19,7 @@ pub trait IsPrefixOf<'cx, 'tcx> {
 
 impl<'cx, 'tcx> IsPrefixOf<'cx, 'tcx> for PlaceRef<'cx, 'tcx> {
     fn is_prefix_of(&self, other: PlaceRef<'cx, 'tcx>) -> bool {
-        self.base == other.base
+        self.local == other.local
             && self.projection.len() <= other.projection.len()
             && self.projection == &other.projection[..self.projection.len()]
     }
@@ -75,21 +75,21 @@ impl<'cx, 'tcx> Iterator for Prefixes<'cx, 'tcx> {
         'cursor: loop {
             match &cursor {
                 PlaceRef {
-                    base: PlaceBase::Local(_),
+                    local: _,
                     projection: [],
                 } => {
                     self.next = None;
                     return Some(cursor);
                 }
                 PlaceRef {
-                    base: _,
+                    local: _,
                     projection: [proj_base @ .., elem],
                 } => {
                     match elem {
                         ProjectionElem::Field(_ /*field*/, _ /*ty*/) => {
                             // FIXME: add union handling
                             self.next = Some(PlaceRef {
-                                base: cursor.base,
+                                local: cursor.local,
                                 projection: proj_base,
                             });
                             return Some(cursor);
@@ -99,7 +99,7 @@ impl<'cx, 'tcx> Iterator for Prefixes<'cx, 'tcx> {
                         ProjectionElem::ConstantIndex { .. } |
                         ProjectionElem::Index(_) => {
                             cursor = PlaceRef {
-                                base: cursor.base,
+                                local: cursor.local,
                                 projection: proj_base,
                             };
                             continue 'cursor;
@@ -123,7 +123,7 @@ impl<'cx, 'tcx> Iterator for Prefixes<'cx, 'tcx> {
                             // All prefixes: just blindly enqueue the base
                             // of the projection.
                             self.next = Some(PlaceRef {
-                                base: cursor.base,
+                                local: cursor.local,
                                 projection: proj_base,
                             });
                             return Some(cursor);
@@ -138,7 +138,7 @@ impl<'cx, 'tcx> Iterator for Prefixes<'cx, 'tcx> {
                     // derefs, except we stop at the deref of a shared
                     // reference.
 
-                    let ty = Place::ty_from(cursor.base, proj_base, *self.body, self.tcx).ty;
+                    let ty = Place::ty_from(cursor.local, proj_base, *self.body, self.tcx).ty;
                     match ty.kind {
                         ty::RawPtr(_) |
                         ty::Ref(
@@ -158,7 +158,7 @@ impl<'cx, 'tcx> Iterator for Prefixes<'cx, 'tcx> {
                             hir::Mutability::Mutable,
                             ) => {
                             self.next = Some(PlaceRef {
-                                base: cursor.base,
+                                local: cursor.local,
                                 projection: proj_base,
                             });
                             return Some(cursor);
@@ -166,7 +166,7 @@ impl<'cx, 'tcx> Iterator for Prefixes<'cx, 'tcx> {
 
                         ty::Adt(..) if ty.is_box() => {
                             self.next = Some(PlaceRef {
-                                base: cursor.base,
+                                local: cursor.local,
                                 projection: proj_base,
                             });
                             return Some(cursor);
