@@ -1,5 +1,5 @@
 use rustc::mir::{self, Location, Place, PlaceBase, Body};
-use rustc::ty::{self, TyCtxt};
+use rustc::ty::TyCtxt;
 use rustc::ty::RegionVid;
 
 use rustc_index::bit_set::BitSet;
@@ -30,7 +30,6 @@ rustc_index::newtype_index! {
 pub struct Borrows<'a, 'tcx> {
     tcx: TyCtxt<'tcx>,
     body: &'a Body<'tcx>,
-    param_env: ty::ParamEnv<'tcx>,
 
     borrow_set: Rc<BorrowSet<'tcx>>,
     borrows_out_of_scope_at_location: FxHashMap<Location, Vec<BorrowIndex>>,
@@ -136,7 +135,6 @@ impl<'a, 'tcx> Borrows<'a, 'tcx> {
     crate fn new(
         tcx: TyCtxt<'tcx>,
         body: &'a Body<'tcx>,
-        param_env: ty::ParamEnv<'tcx>,
         nonlexical_regioncx: Rc<RegionInferenceContext<'tcx>>,
         borrow_set: &Rc<BorrowSet<'tcx>>,
     ) -> Self {
@@ -153,7 +151,6 @@ impl<'a, 'tcx> Borrows<'a, 'tcx> {
         Borrows {
             tcx,
             body,
-            param_env,
             borrow_set: borrow_set.clone(),
             borrows_out_of_scope_at_location,
             _nonlexical_regioncx: nonlexical_regioncx,
@@ -221,7 +218,6 @@ impl<'a, 'tcx> Borrows<'a, 'tcx> {
                 .filter(|&&i| {
                     places_conflict(
                         self.tcx,
-                        self.param_env,
                         self.body,
                         &self.borrow_set.borrows[i].borrowed_place,
                         place,
