@@ -77,11 +77,6 @@ impl<'cx, 'tcx> Iterator for Prefixes<'cx, 'tcx> {
                 PlaceRef {
                     base: PlaceBase::Local(_),
                     projection: [],
-                }
-                | // search yielded this leaf
-                PlaceRef {
-                    base: PlaceBase::Static(_),
-                    projection: [],
                 } => {
                     self.next = None;
                     return Some(cursor);

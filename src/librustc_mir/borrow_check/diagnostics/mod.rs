@@ -7,7 +7,7 @@ use rustc::hir::GeneratorKind;
 use rustc::mir::{
     AggregateKind, Constant, Field, Local, LocalInfo, LocalKind, Location, Operand,
     Place, PlaceBase, PlaceRef, ProjectionElem, Rvalue, Statement, StatementKind,
-    Static, Terminator, TerminatorKind,
+    Terminator, TerminatorKind,
 };
 use rustc::ty::{self, DefIdTree, Ty, TyCtxt};
 use rustc::ty::layout::VariantIdx;
@@ -173,16 +173,6 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
                 projection: [],
             } => {
                 self.append_local_to_string(*local, buf)?;
-            }
-            PlaceRef {
-                base:
-                    PlaceBase::Static(box Static {
-                        def_id,
-                        ..
-                    }),
-                projection: [],
-            } => {
-                buf.push_str(&self.infcx.tcx.item_name(*def_id).to_string());
             }
             PlaceRef {
                 base: &PlaceBase::Local(local),
@@ -360,11 +350,6 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
                 let local = &self.body.local_decls[*local];
                 self.describe_field_from_ty(&local.ty, field, None)
             }
-            PlaceRef {
-                base: PlaceBase::Static(static_),
-                projection: [],
-            } =>
-                self.describe_field_from_ty(&static_.ty, field, None),
             PlaceRef {
                 base,
                 projection: [proj_base @ .., elem],

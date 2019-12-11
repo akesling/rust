@@ -1663,7 +1663,7 @@ impl Debug for Statement<'_> {
     Clone, PartialEq, Eq, PartialOrd, Ord, Hash, RustcEncodable, HashStable,
 )]
 pub struct Place<'tcx> {
-    pub base: PlaceBase<'tcx>,
+    pub base: PlaceBase,
 
     /// projection out of a place (access a field, deref a pointer, etc)
     pub projection: &'tcx List<PlaceElem<'tcx>>,
@@ -1674,24 +1674,9 @@ impl<'tcx> rustc_serialize::UseSpecializedDecodable for Place<'tcx> {}
 #[derive(
     Clone, PartialEq, Eq, PartialOrd, Ord, Hash, RustcEncodable, RustcDecodable, HashStable,
 )]
-pub enum PlaceBase<'tcx> {
+pub enum PlaceBase {
     /// local variable
     Local(Local),
-
-    /// static or static mut variable
-    Static(Box<Static<'tcx>>),
-}
-
-/// We store the normalized type to avoid requiring normalization when reading MIR
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash,
-         RustcEncodable, RustcDecodable, HashStable)]
-pub struct Static<'tcx> {
-    pub ty: Ty<'tcx>,
-    /// The `DefId` of the item this static was declared in. For promoted values, usually, this is
-    /// the same as the `DefId` of the `mir::Body` containing the `Place` this promoted appears in.
-    /// However, after inlining, that might no longer be the case as inlined `Place`s are copied
-    /// into the calling frame.
-    pub def_id: DefId,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -1782,7 +1767,7 @@ rustc_index::newtype_index! {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PlaceRef<'a, 'tcx> {
-    pub base: &'a PlaceBase<'tcx>,
+    pub base: &'a PlaceBase,
     pub projection: &'a [PlaceElem<'tcx>],
 }
 
@@ -1844,7 +1829,7 @@ impl From<Local> for Place<'_> {
     }
 }
 
-impl From<Local> for PlaceBase<'_> {
+impl From<Local> for PlaceBase {
     fn from(local: Local) -> Self {
         PlaceBase::Local(local)
     }
@@ -1939,13 +1924,10 @@ impl Debug for Place<'_> {
     }
 }
 
-impl Debug for PlaceBase<'_> {
+impl Debug for PlaceBase {
     fn fmt(&self, fmt: &mut Formatter<'_>) -> fmt::Result {
         match *self {
             PlaceBase::Local(id) => write!(fmt, "{:?}", id),
-            PlaceBase::Static(box self::Static { ty, def_id }) => {
-                write!(fmt, "({}: {:?})", ty::tls::with(|tcx| tcx.def_path_str(def_id)), ty)
-            }
         }
     }
 }
@@ -3023,18 +3005,16 @@ impl<'tcx> TypeFoldable<'tcx> for Place<'tcx> {
     }
 }
 
-impl<'tcx> TypeFoldable<'tcx> for PlaceBase<'tcx> {
+impl<'tcx> TypeFoldable<'tcx> for PlaceBase {
     fn super_fold_with<F: TypeFolder<'tcx>>(&self, folder: &mut F) -> Self {
         match self {
             PlaceBase::Local(local) => PlaceBase::Local(local.fold_with(folder)),
-            PlaceBase::Static(static_) => PlaceBase::Static(static_.fold_with(folder)),
         }
     }
 
     fn super_visit_with<V: TypeVisitor<'tcx>>(&self, visitor: &mut V) -> bool {
         match self {
             PlaceBase::Local(local) => local.visit_with(visitor),
-            PlaceBase::Static(static_) => (**static_).visit_with(visitor),
         }
     }
 }
@@ -3047,21 +3027,6 @@ impl<'tcx> TypeFoldable<'tcx> for &'tcx ty::List<PlaceElem<'tcx>> {
 
     fn super_visit_with<V: TypeVisitor<'tcx>>(&self, visitor: &mut V) -> bool {
         self.iter().any(|t| t.visit_with(visitor))
-    }
-}
-
-impl<'tcx> TypeFoldable<'tcx> for Static<'tcx> {
-    fn super_fold_with<F: TypeFolder<'tcx>>(&self, folder: &mut F) -> Self {
-        Static {
-            ty: self.ty.fold_with(folder),
-            def_id: self.def_id,
-        }
-    }
-
-    fn super_visit_with<V: TypeVisitor<'tcx>>(&self, visitor: &mut V) -> bool {
-        let Static { ty, def_id: _ } = self;
-
-        ty.visit_with(visitor)
     }
 }
 

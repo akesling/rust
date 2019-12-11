@@ -517,9 +517,6 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
 
                 self.access_local(self.frame(), *local, layout)?
             }
-            PlaceBase::Static(place_static) => {
-                self.eval_static_to_mplace(&place_static)?.into()
-            }
         };
 
         let op = place.projection.iter().try_fold(

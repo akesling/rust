@@ -439,9 +439,6 @@ impl Inliner<'tcx> {
                     }
 
                     match place.base {
-                        // Static variables need a borrow because the callee
-                        // might modify the same static.
-                        PlaceBase::Static(_) => true,
                         _ => false
                     }
                 }

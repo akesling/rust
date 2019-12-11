@@ -410,13 +410,6 @@ impl Visitor<'tcx> for Validator<'_, 'mir, 'tcx> {
                 self.check_op(ops::MutAddressOf)
             }
 
-            // At the moment, `PlaceBase::Static` is only used for promoted MIR.
-            | Rvalue::Ref(_, BorrowKind::Shared, ref place)
-            | Rvalue::Ref(_, BorrowKind::Shallow, ref place)
-            | Rvalue::AddressOf(Mutability::Not, ref place)
-            if matches!(place.base, PlaceBase::Static(_))
-            => bug!("Saw a promoted during const-checking, which must run before promotion"),
-
             | Rvalue::Ref(_, BorrowKind::Shared, ref place)
             | Rvalue::Ref(_, BorrowKind::Shallow, ref place) => {
                 self.check_immutable_borrow_like(location, place)
@@ -457,7 +450,7 @@ impl Visitor<'tcx> for Validator<'_, 'mir, 'tcx> {
 
     fn visit_place_base(
         &mut self,
-        place_base: &PlaceBase<'tcx>,
+        place_base: &PlaceBase,
         context: PlaceContext,
         location: Location,
     ) {
@@ -471,9 +464,6 @@ impl Visitor<'tcx> for Validator<'_, 'mir, 'tcx> {
 
         match place_base {
             PlaceBase::Local(_) => {}
-            PlaceBase::Static(_) => {
-                bug!("Promotion must be run after const validation");
-            }
         }
     }
 
@@ -491,7 +481,7 @@ impl Visitor<'tcx> for Validator<'_, 'mir, 'tcx> {
     }
     fn visit_projection_elem(
         &mut self,
-        place_base: &PlaceBase<'tcx>,
+        place_base: &PlaceBase,
         proj_base: &[PlaceElem<'tcx>],
         elem: &PlaceElem<'tcx>,
         context: PlaceContext,
@@ -724,10 +714,11 @@ fn place_as_reborrow(
 
             // A borrow of a `static` also looks like `&(*_1)` in the MIR, but `_1` is a `const`
             // that points to the allocation for the static. Don't treat these as reborrows.
-            if let PlaceBase::Local(local) = place.base {
-                if body.local_decls[local].is_ref_to_static() {
-                    return None;
-                }
+            match place.base {
+                PlaceBase::Local(local) => 
+                    if body.local_decls[local].is_ref_to_static() {
+                        return None;
+                    }
             }
 
             // Ensure the type being derefed is a reference and not a raw pointer.

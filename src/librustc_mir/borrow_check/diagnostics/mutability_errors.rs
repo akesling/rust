@@ -150,10 +150,6 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, 'tcx> {
             }
 
             PlaceRef {
-                base: PlaceBase::Static(_),
-                ..
-            }
-            | PlaceRef {
                 base: _,
                 projection: [.., ProjectionElem::Index(_)],
             }

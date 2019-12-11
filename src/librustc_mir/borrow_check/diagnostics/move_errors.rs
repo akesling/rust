@@ -248,9 +248,6 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, 'tcx> {
                    self.is_upvar_field_projection(original_path.as_ref()));
             (
                 match kind {
-                    IllegalMoveOriginKind::Static => {
-                        unreachable!();
-                    }
                     IllegalMoveOriginKind::BorrowedContent { target_place } => {
                         self.report_cannot_move_from_borrowed_content(
                             original_path,

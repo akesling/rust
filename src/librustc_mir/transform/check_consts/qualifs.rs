@@ -88,10 +88,6 @@ pub trait Qualif {
                 projection: [],
             } => per_local(*local),
             PlaceRef {
-                base: PlaceBase::Static(_),
-                projection: [],
-            } => bug!("qualifying already promoted MIR"),
-            PlaceRef {
                 base: _,
                 projection: [.., _],
             } => Self::in_projection(cx, per_local, place),

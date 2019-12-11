@@ -297,22 +297,15 @@ impl MutVisitor<'tcx> for TransformVisitor<'tcx> {
     fn visit_place(
         &mut self,
         place: &mut Place<'tcx>,
-        context: PlaceContext,
-        location: Location,
+        _context: PlaceContext,
+        _location: Location,
     ) {
-        if let PlaceBase::Local(l) = place.base {
-            // Replace an Local in the remap with a generator struct access
-            if let Some(&(ty, variant_index, idx)) = self.remap.get(&l) {
-                replace_base(place, self.make_field(variant_index, idx, ty), self.tcx);
-            }
-        } else {
-            self.visit_place_base(&mut place.base, context, location);
-
-            for elem in place.projection.iter() {
-                if let PlaceElem::Index(local) = elem {
-                    assert_ne!(*local, self_arg());
+        match place.base {
+            PlaceBase::Local(l) => 
+                // Replace an Local in the remap with a generator struct access
+                if let Some(&(ty, variant_index, idx)) = self.remap.get(&l) {
+                    replace_base(place, self.make_field(variant_index, idx, ty), self.tcx);
                 }
-            }
         }
     }
 

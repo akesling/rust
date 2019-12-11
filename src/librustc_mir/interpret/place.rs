@@ -11,13 +11,12 @@ use rustc::ty::{self, Ty};
 use rustc::ty::layout::{
     self, Size, Align, LayoutOf, TyLayout, HasDataLayout, VariantIdx, PrimitiveExt
 };
-use rustc::ty::TypeFoldable;
 use rustc_macros::HashStable;
 
 use super::{
-    GlobalId, AllocId, Allocation, Scalar, InterpResult, Pointer, PointerArithmetic,
-    InterpCx, Machine, AllocMap, AllocationExtra,
-    RawConst, Immediate, ImmTy, ScalarMaybeUndef, Operand, OpTy, MemoryKind, LocalValue,
+    AllocId, Allocation, Scalar, InterpResult, Pointer, PointerArithmetic, InterpCx, Machine,
+    AllocMap, AllocationExtra, RawConst, Immediate, ImmTy, ScalarMaybeUndef, Operand, OpTy,
+    MemoryKind, LocalValue,
 };
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, HashStable)]
@@ -590,40 +589,6 @@ where
         })
     }
 
-    /// Evaluate statics and promoteds to an `MPlace`. Used to share some code between
-    /// `eval_place` and `eval_place_to_op`.
-    pub(super) fn eval_static_to_mplace(
-        &self,
-        place_static: &mir::Static<'tcx>
-    ) -> InterpResult<'tcx, MPlaceTy<'tcx, M::PointerTag>> {
-        let ty = place_static.ty;
-        assert!(!ty.needs_subst());
-        let layout = self.layout_of(ty)?;
-        let instance = ty::Instance::mono(*self.tcx, place_static.def_id);
-        let cid = GlobalId {
-            instance,
-            promoted: None
-        };
-        // Just create a lazy reference, so we can support recursive statics.
-        // tcx takes care of assigning every static one and only one unique AllocId.
-        // When the data here is ever actually used, memory will notice,
-        // and it knows how to deal with alloc_id that are present in the
-        // global table but not in its local memory: It calls back into tcx through
-        // a query, triggering the CTFE machinery to actually turn this lazy reference
-        // into a bunch of bytes.  IOW, statics are evaluated with CTFE even when
-        // this InterpCx uses another Machine (e.g., in miri).  This is what we
-        // want!  This way, computing statics works consistently between codegen
-        // and miri: They use the same query to eventually obtain a `ty::Const`
-        // and use that for further computation.
-        //
-        // Notice that statics have *two* AllocIds: the lazy one, and the resolved
-        // one.  Here we make sure that the interpreted program never sees the
-        // resolved ID.  Also see the doc comment of `Memory::get_static_alloc`.
-        let alloc_id = self.tcx.alloc_map.lock().create_static_alloc(cid.instance.def_id());
-        let ptr = self.tag_static_base_pointer(Pointer::from(alloc_id));
-        Ok(MPlaceTy::from_aligned_ptr(ptr, layout))
-    }
-
     /// Computes a place. You should only use this if you intend to write into this
     /// place; for reading, a more efficient alternative is `eval_place_for_read`.
     pub fn eval_place(
@@ -664,7 +629,6 @@ where
                 },
                 layout: self.layout_of_local(self.frame(), *local, None)?,
             },
-            PlaceBase::Static(place_static) => self.eval_static_to_mplace(&place_static)?.into(),
         };
 
         for elem in place.projection.iter() {
