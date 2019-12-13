@@ -1815,7 +1815,7 @@ impl<'tcx> Place<'tcx> {
 impl From<Local> for Place<'_> {
     fn from(local: Local) -> Self {
         Place {
-            local: local.into(),
+            local,
             projection: List::empty(),
         }
     }
