@@ -635,6 +635,8 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                             val: Immediate(llval),
                             layout: bx.layout_of(ty)
                         };
+                    } else {
+                        span_bug!(span, "shuffle indices must be constant");
                     }
                 }
 
