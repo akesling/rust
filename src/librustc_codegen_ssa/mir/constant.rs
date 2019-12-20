@@ -20,8 +20,9 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             // use `get_static` to get at their id.
             // FIXME(oli-obk): can we unify this somehow, maybe by making const eval of statics
             // always produce `&STATIC`. This may also simplify how const eval works with statics.
-            ty::ConstKind::Unevaluated(def_id, substs)
+            ty::ConstKind::Unevaluated(def_id, substs, promoted)
                 if self.cx.tcx().is_static(def_id) => {
+                    assert!(promoted.is_none());
                     assert!(substs.is_empty(), "we don't support generic statics yet");
                     let static_ = bx.get_static(def_id);
                     // we treat operands referring to statics as if they were `&STATIC` instead
@@ -41,17 +42,22 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
         constant: &mir::Constant<'tcx>,
     ) -> Result<&'tcx ty::Const<'tcx>, ErrorHandled> {
         match constant.literal.val {
-            ty::ConstKind::Unevaluated(def_id, substs) => {
+            ty::ConstKind::Unevaluated(def_id, substs, promoted) => {
                 let substs = self.monomorphize(&substs);
                 let instance = ty::Instance::resolve(
                     self.cx.tcx(), ty::ParamEnv::reveal_all(), def_id, substs,
                 ).unwrap();
                 let cid = mir::interpret::GlobalId {
                     instance,
-                    promoted: None,
+                    promoted,
                 };
                 self.cx.tcx().const_eval(ty::ParamEnv::reveal_all().and(cid)).map_err(|err| {
-                    self.cx.tcx().sess.span_err(constant.span, "erroneous constant encountered");
+                    if promoted.is_none() {
+                        self.cx
+                            .tcx()
+                            .sess
+                            .span_err(constant.span, "erroneous constant encountered");
+                    }
                     err
                 })
             },

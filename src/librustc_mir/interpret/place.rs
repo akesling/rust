@@ -11,13 +11,12 @@ use rustc::ty::{self, Ty};
 use rustc::ty::layout::{
     self, Size, Align, LayoutOf, TyLayout, HasDataLayout, VariantIdx, PrimitiveExt
 };
-use rustc::ty::TypeFoldable;
 use rustc_macros::HashStable;
 
 use super::{
-    GlobalId, AllocId, Allocation, Scalar, InterpResult, Pointer, PointerArithmetic,
-    InterpCx, Machine, AllocMap, AllocationExtra,
-    RawConst, Immediate, ImmTy, ScalarMaybeUndef, Operand, OpTy, MemoryKind, LocalValue,
+    AllocId, Allocation, Scalar, InterpResult, Pointer, PointerArithmetic, InterpCx, Machine,
+    AllocMap, AllocationExtra, RawConst, Immediate, ImmTy, ScalarMaybeUndef, Operand, OpTy,
+    MemoryKind, LocalValue,
 };
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, HashStable)]
@@ -590,72 +589,14 @@ where
         })
     }
 
-    /// Evaluate statics and promoteds to an `MPlace`. Used to share some code between
-    /// `eval_place` and `eval_place_to_op`.
-    pub(super) fn eval_static_to_mplace(
-        &self,
-        place_static: &mir::Static<'tcx>
-    ) -> InterpResult<'tcx, MPlaceTy<'tcx, M::PointerTag>> {
-        use rustc::mir::StaticKind;
-
-        Ok(match place_static.kind {
-            StaticKind::Promoted(promoted, promoted_substs) => {
-                let substs = self.subst_from_frame_and_normalize_erasing_regions(promoted_substs);
-                let instance = ty::Instance::new(place_static.def_id, substs);
-
-                // Even after getting `substs` from the frame, this instance may still be
-                // polymorphic because `ConstProp` will try to promote polymorphic MIR.
-                if instance.needs_subst() {
-                    throw_inval!(TooGeneric);
-                }
-
-                self.const_eval_raw(GlobalId {
-                    instance,
-                    promoted: Some(promoted),
-                })?
-            }
-
-            StaticKind::Static => {
-                let ty = place_static.ty;
-                assert!(!ty.needs_subst());
-                let layout = self.layout_of(ty)?;
-                let instance = ty::Instance::mono(*self.tcx, place_static.def_id);
-                let cid = GlobalId {
-                    instance,
-                    promoted: None
-                };
-                // Just create a lazy reference, so we can support recursive statics.
-                // tcx takes care of assigning every static one and only one unique AllocId.
-                // When the data here is ever actually used, memory will notice,
-                // and it knows how to deal with alloc_id that are present in the
-                // global table but not in its local memory: It calls back into tcx through
-                // a query, triggering the CTFE machinery to actually turn this lazy reference
-                // into a bunch of bytes.  IOW, statics are evaluated with CTFE even when
-                // this InterpCx uses another Machine (e.g., in miri).  This is what we
-                // want!  This way, computing statics works consistently between codegen
-                // and miri: They use the same query to eventually obtain a `ty::Const`
-                // and use that for further computation.
-                //
-                // Notice that statics have *two* AllocIds: the lazy one, and the resolved
-                // one.  Here we make sure that the interpreted program never sees the
-                // resolved ID.  Also see the doc comment of `Memory::get_static_alloc`.
-                let alloc_id = self.tcx.alloc_map.lock().create_static_alloc(cid.instance.def_id());
-                let ptr = self.tag_static_base_pointer(Pointer::from(alloc_id));
-                MPlaceTy::from_aligned_ptr(ptr, layout)
-            }
-        })
-    }
-
     /// Computes a place. You should only use this if you intend to write into this
     /// place; for reading, a more efficient alternative is `eval_place_for_read`.
     pub fn eval_place(
         &mut self,
         place: &mir::Place<'tcx>,
     ) -> InterpResult<'tcx, PlaceTy<'tcx, M::PointerTag>> {
-        use rustc::mir::PlaceBase;
-
-        let mut place_ty = match &place.base {
-            PlaceBase::Local(mir::RETURN_PLACE) => {
+        let mut place_ty = match place.local {
+            mir::RETURN_PLACE => {
                 // `return_place` has the *caller* layout, but we want to use our
                 // `layout to verify our assumption. The caller will validate
                 // their layout on return.
@@ -678,15 +619,14 @@ where
                     )?,
                 }
             },
-            PlaceBase::Local(local) => PlaceTy {
+            local => PlaceTy {
                 // This works even for dead/uninitialized locals; we check further when writing
                 place: Place::Local {
                     frame: self.cur_frame(),
-                    local: *local,
+                    local,
                 },
-                layout: self.layout_of_local(self.frame(), *local, None)?,
+                layout: self.layout_of_local(self.frame(), local, None)?,
             },
-            PlaceBase::Static(place_static) => self.eval_static_to_mplace(&place_static)?.into(),
         };
 
         for elem in place.projection.iter() {
@@ -939,8 +879,10 @@ where
             return self.copy_op(src, dest);
         }
         // We still require the sizes to match.
-        assert!(src.layout.size == dest.layout.size,
-            "Size mismatch when transmuting!\nsrc: {:#?}\ndest: {:#?}", src, dest);
+        if src.layout.size != dest.layout.size {
+            error!("Size mismatch when transmuting!\nsrc: {:#?}\ndest: {:#?}", src, dest);
+            throw_unsup!(TransmuteSizeDiff(src.layout.ty, dest.layout.ty));
+        }
         // Unsized copies rely on interpreting `src.meta` with `dest.layout`, we want
         // to avoid that here.
         assert!(!src.layout.is_unsized() && !dest.layout.is_unsized(),
@@ -984,30 +926,20 @@ where
         let (mplace, size) = match place.place {
             Place::Local { frame, local } => {
                 match self.stack[frame].locals[local].access_mut()? {
-                    Ok(local_val) => {
+                    Ok(&mut local_val) => {
                         // We need to make an allocation.
-                        // FIXME: Consider not doing anything for a ZST, and just returning
-                        // a fake pointer?  Are we even called for ZST?
-
-                        // We cannot hold on to the reference `local_val` while allocating,
-                        // but we can hold on to the value in there.
-                        let old_val =
-                            if let LocalValue::Live(Operand::Immediate(value)) = *local_val {
-                                Some(value)
-                            } else {
-                                None
-                            };
 
                         // We need the layout of the local.  We can NOT use the layout we got,
                         // that might e.g., be an inner field of a struct with `Scalar` layout,
                         // that has different alignment than the outer field.
-                        // We also need to support unsized types, and hence cannot use `allocate`.
                         let local_layout = self.layout_of_local(&self.stack[frame], local, None)?;
+
+                        // We also need to support unsized types, and hence cannot use `allocate`.
                         let (size, align) = self.size_and_align_of(meta, local_layout)?
                             .expect("Cannot allocate for non-dyn-sized type");
                         let ptr = self.memory.allocate(size, align, MemoryKind::Stack);
                         let mplace = MemPlace { ptr: ptr.into(), align, meta };
-                        if let Some(value) = old_val {
+                        if let LocalValue::Live(Operand::Immediate(value)) = local_val {
                             // Preserve old value.
                             // We don't have to validate as we can assume the local
                             // was already valid for its type.

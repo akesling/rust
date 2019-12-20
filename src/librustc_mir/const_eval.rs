@@ -85,7 +85,7 @@ fn op_to_const<'tcx>(
     };
     let val = match immediate {
         Ok(mplace) => {
-            let ptr = mplace.ptr.to_ptr().unwrap();
+            let ptr = mplace.ptr.assert_ptr();
             let alloc = ecx.tcx.alloc_map.lock().unwrap_memory(ptr.alloc_id);
             ConstValue::ByRef { alloc, offset: ptr.offset }
         },
@@ -99,7 +99,7 @@ fn op_to_const<'tcx>(
                 // comes from a constant so it can happen have `Undef`, because the indirect
                 // memory that was read had undefined bytes.
                 let mplace = op.assert_mem_place();
-                let ptr = mplace.ptr.to_ptr().unwrap();
+                let ptr = mplace.ptr.assert_ptr();
                 let alloc = ecx.tcx.alloc_map.lock().unwrap_memory(ptr.alloc_id);
                 ConstValue::ByRef { alloc, offset: ptr.offset }
             },
@@ -167,7 +167,12 @@ fn eval_body_using_ecx<'mir, 'tcx>(
     ecx.run()?;
 
     // Intern the result
-    intern_const_alloc_recursive(ecx, tcx.static_mutability(cid.instance.def_id()), ret)?;
+    intern_const_alloc_recursive(
+        ecx,
+        tcx.static_mutability(cid.instance.def_id()),
+        ret,
+        body.ignore_interior_mut_in_const_validation,
+    )?;
 
     debug!("eval_body_using_ecx done: {:?}", *ret);
     Ok(ret)
@@ -564,7 +569,7 @@ pub fn const_caller_location<'tcx>(
 
     let loc_ty = tcx.caller_location_ty();
     let loc_place = ecx.alloc_caller_location(file, line, col);
-    intern_const_alloc_recursive(&mut ecx, None, loc_place).unwrap();
+    intern_const_alloc_recursive(&mut ecx, None, loc_place, false).unwrap();
     let loc_const = ty::Const {
         ty: loc_ty,
         val: ty::ConstKind::Value(ConstValue::Scalar(loc_place.ptr.into())),
@@ -613,20 +618,25 @@ fn validate_and_turn_into_const<'tcx>(
     let ecx = mk_eval_cx(tcx, tcx.def_span(key.value.instance.def_id()), key.param_env);
     let val = (|| {
         let mplace = ecx.raw_const_to_mplace(constant)?;
-        let mut ref_tracking = RefTracking::new(mplace);
-        while let Some((mplace, path)) = ref_tracking.todo.pop() {
-            ecx.validate_operand(
-                mplace.into(),
-                path,
-                Some(&mut ref_tracking),
-            )?;
+
+        // FIXME do not validate promoteds until a decision on
+        // https://github.com/rust-lang/rust/issues/67465 is made
+        if cid.promoted.is_none() {
+            let mut ref_tracking = RefTracking::new(mplace);
+            while let Some((mplace, path)) = ref_tracking.todo.pop() {
+                ecx.validate_operand(
+                    mplace.into(),
+                    path,
+                    Some(&mut ref_tracking),
+                )?;
+            }
         }
         // Now that we validated, turn this into a proper constant.
         // Statics/promoteds are always `ByRef`, for the rest `op_to_const` decides
         // whether they become immediates.
         let def_id = cid.instance.def.def_id();
         if tcx.is_static(def_id) || cid.promoted.is_some() {
-            let ptr = mplace.ptr.to_ptr()?;
+            let ptr = mplace.ptr.assert_ptr();
             Ok(tcx.mk_const(ty::Const {
                 val: ty::ConstKind::Value(ConstValue::ByRef {
                     alloc: ecx.tcx.alloc_map.lock().unwrap_memory(ptr.alloc_id),

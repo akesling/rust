@@ -116,7 +116,7 @@ impl<'tcx> PlaceTy<'tcx> {
 
 impl<'tcx> Place<'tcx> {
     pub fn ty_from<D>(
-        base: &PlaceBase<'tcx>,
+        local: &Local,
         projection: &[PlaceElem<'tcx>],
         local_decls: &D,
         tcx: TyCtxt<'tcx>
@@ -124,7 +124,7 @@ impl<'tcx> Place<'tcx> {
         where D: HasLocalDecls<'tcx>
     {
         projection.iter().fold(
-            base.ty(local_decls),
+            PlaceTy::from_ty(local_decls.local_decls()[*local].ty),
             |place_ty, elem| place_ty.projection_ty(tcx, elem)
         )
     }
@@ -133,18 +133,7 @@ impl<'tcx> Place<'tcx> {
     where
         D: HasLocalDecls<'tcx>,
     {
-        Place::ty_from(&self.base, &self.projection, local_decls, tcx)
-    }
-}
-
-impl<'tcx> PlaceBase<'tcx> {
-    pub fn ty<D>(&self, local_decls: &D) -> PlaceTy<'tcx>
-        where D: HasLocalDecls<'tcx>
-    {
-        match self {
-            PlaceBase::Local(index) => PlaceTy::from_ty(local_decls.local_decls()[*index].ty),
-            PlaceBase::Static(data) => PlaceTy::from_ty(data.ty),
-        }
+        Place::ty_from(&self.local, &self.projection, local_decls, tcx)
     }
 }
 

@@ -12,4 +12,6 @@ fn main() {
     println!("{} {}", X, Y);
     //~^ ERROR evaluation of constant expression failed
     //~| ERROR evaluation of constant expression failed
+    //~| WARN erroneous constant used [const_err]
+    //~| WARN erroneous constant used [const_err]
 }

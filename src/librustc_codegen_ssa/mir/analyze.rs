@@ -12,7 +12,6 @@ use rustc::mir::traversal;
 use rustc::session::config::DebugInfo;
 use rustc::ty;
 use rustc::ty::layout::{LayoutOf, HasTyCtxt};
-use syntax_pos::DUMMY_SP;
 use super::FunctionCx;
 use crate::traits::*;
 
@@ -131,7 +130,7 @@ impl<Bx: BuilderMethods<'a, 'tcx>> LocalAnalyzer<'mir, 'a, 'tcx, Bx> {
             };
             if is_consume {
                 let base_ty =
-                    mir::Place::ty_from(place_ref.base, proj_base, *self.fx.mir, cx.tcx());
+                    mir::Place::ty_from(place_ref.local, proj_base, *self.fx.mir, cx.tcx());
                 let base_ty = self.fx.monomorphize(&base_ty);
 
                 // ZSTs don't require any actual memory access.
@@ -139,11 +138,7 @@ impl<Bx: BuilderMethods<'a, 'tcx>> LocalAnalyzer<'mir, 'a, 'tcx, Bx> {
                     .projection_ty(cx.tcx(), elem)
                     .ty;
                 let elem_ty = self.fx.monomorphize(&elem_ty);
-                let span = if let mir::PlaceBase::Local(index) = place_ref.base {
-                    self.fx.mir.local_decls[*index].source_info.span
-                } else {
-                    DUMMY_SP
-                };
+                let span = self.fx.mir.local_decls[*place_ref.local].source_info.span;
                 if cx.spanned_layout_of(elem_ty, span).is_zst() {
                     return;
                 }
@@ -183,9 +178,7 @@ impl<Bx: BuilderMethods<'a, 'tcx>> LocalAnalyzer<'mir, 'a, 'tcx, Bx> {
                     // We use `NonUseContext::VarDebugInfo` for the base,
                     // which might not force the base local to memory,
                     // so we have to do it manually.
-                    if let mir::PlaceBase::Local(local) = place_ref.base {
-                        self.visit_local(&local, context, location);
-                    }
+                    self.visit_local(place_ref.local, context, location);
                 }
             }
 
@@ -197,7 +190,7 @@ impl<Bx: BuilderMethods<'a, 'tcx>> LocalAnalyzer<'mir, 'a, 'tcx, Bx> {
 
             self.process_place(
                 &mir::PlaceRef {
-                    base: place_ref.base,
+                    local: place_ref.local,
                     projection: proj_base,
                 },
                 base_context,
@@ -226,8 +219,8 @@ impl<Bx: BuilderMethods<'a, 'tcx>> LocalAnalyzer<'mir, 'a, 'tcx, Bx> {
                 };
             }
 
-            self.visit_place_base(place_ref.base, context, location);
-            self.visit_projection(place_ref.base, place_ref.projection, context, location);
+            self.visit_place_base(place_ref.local, context, location);
+            self.visit_projection(place_ref.local, place_ref.projection, context, location);
         }
     }
 

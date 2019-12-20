@@ -181,12 +181,12 @@ use rustc::hir::itemlikevisit::ItemLikeVisitor;
 use rustc::hir::def_id::{DefId, LOCAL_CRATE};
 use rustc::mir::interpret::{AllocId, ConstValue};
 use rustc::middle::lang_items::{ExchangeMallocFnLangItem, StartFnLangItem};
-use rustc::ty::subst::{InternalSubsts, Subst, SubstsRef};
+use rustc::ty::subst::{InternalSubsts, SubstsRef};
 use rustc::ty::{self, TypeFoldable, Ty, TyCtxt, GenericParamDefKind, Instance};
 use rustc::ty::print::obsolete::DefPathBasedNames;
 use rustc::ty::adjustment::{CustomCoerceUnsized, PointerCast};
 use rustc::session::config::EntryFnType;
-use rustc::mir::{self, Location, PlaceBase, Static, StaticKind};
+use rustc::mir::{self, Local, Location};
 use rustc::mir::visit::Visitor as MirVisitor;
 use rustc::mir::mono::{MonoItem, InstantiationMode};
 use rustc::mir::interpret::{Scalar, GlobalId, GlobalAlloc, ErrorHandled};
@@ -663,42 +663,9 @@ impl<'a, 'tcx> MirVisitor<'tcx> for MirNeighborCollector<'a, 'tcx> {
     }
 
     fn visit_place_base(&mut self,
-                        place_base: &mir::PlaceBase<'tcx>,
+                        _place_local: &Local,
                         _context: mir::visit::PlaceContext,
-                        location: Location) {
-        match place_base {
-            PlaceBase::Static(box Static { kind: StaticKind::Static, def_id, .. }) => {
-                debug!("visiting static {:?} @ {:?}", def_id, location);
-
-                let tcx = self.tcx;
-                let instance = Instance::mono(tcx, *def_id);
-                if should_monomorphize_locally(tcx, &instance) {
-                    self.output.push(MonoItem::Static(*def_id));
-                }
-            }
-            PlaceBase::Static(box Static {
-                kind: StaticKind::Promoted(promoted, substs),
-                def_id,
-                ..
-            }) => {
-                let param_env = ty::ParamEnv::reveal_all();
-                let cid = GlobalId {
-                    instance: Instance::new(*def_id, substs.subst(self.tcx, self.param_substs)),
-                    promoted: Some(*promoted),
-                };
-                match self.tcx.const_eval(param_env.and(cid)) {
-                    Ok(val) => collect_const(self.tcx, val, substs, self.output),
-                    Err(ErrorHandled::Reported) => {},
-                    Err(ErrorHandled::TooGeneric) => {
-                        let span = self.tcx.promoted_mir(*def_id)[*promoted].span;
-                        span_bug!(span, "collection encountered polymorphic constant")
-                    },
-                }
-            }
-            PlaceBase::Local(_) => {
-                // Locals have no relevance for collector.
-            }
-        }
+                        _location: Location) {
     }
 }
 
@@ -1287,7 +1254,7 @@ fn collect_const<'tcx>(
                 collect_miri(tcx, id, output);
             }
         }
-        ty::ConstKind::Unevaluated(def_id, substs) => {
+        ty::ConstKind::Unevaluated(def_id, substs, promoted) => {
             let instance = ty::Instance::resolve(tcx,
                                                 param_env,
                                                 def_id,
@@ -1295,7 +1262,7 @@ fn collect_const<'tcx>(
 
             let cid = GlobalId {
                 instance,
-                promoted: None,
+                promoted,
             };
             match tcx.const_eval(param_env.and(cid)) {
                 Ok(val) => collect_const(tcx, val, param_substs, output),

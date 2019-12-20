@@ -6,7 +6,7 @@ use crate::common::IntPredicate;
 use crate::glue;
 use crate::traits::*;
 
-use rustc::ty::{self, Instance, Ty};
+use rustc::ty::{self, Ty};
 use rustc::ty::layout::{self, Align, TyLayout, LayoutOf, VariantIdx, HasTyCtxt};
 use rustc::mir;
 use rustc::mir::tcx::PlaceTy;
@@ -51,20 +51,6 @@ impl<'a, 'tcx, V: CodegenObject> PlaceRef<'tcx, V> {
             llextra: None,
             layout,
             align
-        }
-    }
-
-    fn new_thin_place<Bx: BuilderMethods<'a, 'tcx, Value = V>>(
-        bx: &mut Bx,
-        llval: V,
-        layout: TyLayout<'tcx>,
-    ) -> PlaceRef<'tcx, V> {
-        assert!(!bx.cx().type_has_metadata(layout.ty));
-        PlaceRef {
-            llval,
-            llextra: None,
-            layout,
-            align: layout.align.abi
         }
     }
 
@@ -450,10 +436,10 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
 
         let result = match place_ref {
             mir::PlaceRef {
-                base: mir::PlaceBase::Local(index),
+                local,
                 projection: [],
             } => {
-                match self.locals[*index] {
+                match self.locals[**local] {
                     LocalRef::Place(place) => {
                         return place;
                     }
@@ -466,75 +452,22 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 }
             }
             mir::PlaceRef {
-                base: mir::PlaceBase::Static(box mir::Static {
-                    ty,
-                    kind: mir::StaticKind::Promoted(promoted, substs),
-                    def_id,
-                }),
-                projection: [],
-            } => {
-                let param_env = ty::ParamEnv::reveal_all();
-                let instance = Instance::new(*def_id, self.monomorphize(substs));
-                let cid = mir::interpret::GlobalId {
-                    instance: instance,
-                    promoted: Some(*promoted),
-                };
-                let layout = cx.layout_of(self.monomorphize(&ty));
-                match bx.tcx().const_eval(param_env.and(cid)) {
-                    Ok(val) => match val.val {
-                        ty::ConstKind::Value(mir::interpret::ConstValue::ByRef {
-                            alloc, offset
-                        }) => {
-                            bx.cx().from_const_alloc(layout, alloc, offset)
-                        }
-                        _ => bug!("promoteds should have an allocation: {:?}", val),
-                    },
-                    Err(_) => {
-                        // This is unreachable as long as runtime
-                        // and compile-time agree perfectly.
-                        // With floats that won't always be true,
-                        // so we generate a (safe) abort.
-                        bx.abort();
-                        // We still have to return a place but it doesn't matter,
-                        // this code is unreachable.
-                        let llval = bx.cx().const_undef(
-                            bx.cx().type_ptr_to(bx.cx().backend_type(layout))
-                        );
-                        PlaceRef::new_sized(llval, layout)
-                    }
-                }
-            }
-            mir::PlaceRef {
-                base: mir::PlaceBase::Static(box mir::Static {
-                    ty,
-                    kind: mir::StaticKind::Static,
-                    def_id,
-                }),
-                projection: [],
-            } => {
-                // NB: The layout of a static may be unsized as is the case when working
-                // with a static that is an extern_type.
-                let layout = cx.layout_of(self.monomorphize(&ty));
-                let static_ = bx.get_static(*def_id);
-                PlaceRef::new_thin_place(bx, static_, layout)
-            },
-            mir::PlaceRef {
-                base,
+                local,
                 projection: [proj_base @ .., mir::ProjectionElem::Deref],
             } => {
                 // Load the pointer from its location.
                 self.codegen_consume(bx, &mir::PlaceRef {
-                    base,
+                    local,
                     projection: proj_base,
                 }).deref(bx.cx())
             }
             mir::PlaceRef {
-                base,
+                local,
                 projection: [proj_base @ .., elem],
             } => {
                 // FIXME turn this recursion into iteration
                 let cg_base = self.codegen_place(bx, &mir::PlaceRef {
-                    base,
+                    local,
                     projection: proj_base,
                 });
 
@@ -598,7 +531,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
     pub fn monomorphized_place_ty(&self, place_ref: &mir::PlaceRef<'_, 'tcx>) -> Ty<'tcx> {
         let tcx = self.cx.tcx();
         let place_ty = mir::Place::ty_from(
-            place_ref.base,
+            place_ref.local,
             place_ref.projection,
             *self.mir,
             tcx,

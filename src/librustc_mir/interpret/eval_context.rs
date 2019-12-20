@@ -121,7 +121,7 @@ pub struct LocalState<'tcx, Tag=(), Id=AllocId> {
 }
 
 /// Current value of a local variable
-#[derive(Clone, PartialEq, Eq, Debug, HashStable)] // Miri debug-prints these
+#[derive(Copy, Clone, PartialEq, Eq, Debug, HashStable)] // Miri debug-prints these
 pub enum LocalValue<Tag=(), Id=AllocId> {
     /// This local is not currently alive, and cannot be used at all.
     Dead,
@@ -752,7 +752,9 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
         // FIXME: should we tell the user that there was a local which was never written to?
         if let LocalValue::Live(Operand::Indirect(MemPlace { ptr, .. })) = local {
             trace!("deallocating local");
-            let ptr = ptr.to_ptr()?;
+            // All locals have a backing allocation, even if the allocation is empty
+            // due to the local having ZST type.
+            let ptr = ptr.assert_ptr();
             if log_enabled!(::log::Level::Trace) {
                 self.memory.dump_alloc(ptr.alloc_id);
             }
@@ -766,8 +768,6 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
         gid: GlobalId<'tcx>,
     ) -> InterpResult<'tcx, MPlaceTy<'tcx, M::PointerTag>> {
         // FIXME(oli-obk): make this check an assertion that it's not a static here
-        // FIXME(RalfJ, oli-obk): document that `Place::Static` can never be anything but a static
-        // and `ConstValue::Unevaluated` can never be a static
         let param_env = if self.tcx.is_static(gid.instance.def_id()) {
             ty::ParamEnv::reveal_all()
         } else {

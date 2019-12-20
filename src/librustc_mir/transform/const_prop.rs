@@ -4,10 +4,11 @@
 use std::borrow::Cow;
 use std::cell::Cell;
 
+use rustc::hir::HirId;
 use rustc::hir::def::DefKind;
 use rustc::hir::def_id::DefId;
 use rustc::mir::{
-    AggregateKind, Constant, Location, Place, PlaceBase, Body, BodyAndCache, Operand, Local, UnOp,
+    AggregateKind, Constant, Location, Place, Body, BodyAndCache, Operand, Local, UnOp,
     Rvalue, StatementKind, Statement, LocalKind, TerminatorKind, Terminator, ClearCrossCrate,
     SourceInfo, BinOp, SourceScope, SourceScopeData, LocalDecl, BasicBlock, ReadOnlyBodyAndCache,
     read_only, RETURN_PLACE
@@ -26,6 +27,7 @@ use rustc::ty::layout::{
     LayoutOf, TyLayout, LayoutError, HasTyCtxt, TargetDataLayout, HasDataLayout, Size,
 };
 
+use crate::rustc::ty::TypeFoldable;
 use crate::rustc::ty::subst::Subst;
 use crate::interpret::{
     self, InterpCx, ScalarMaybeUndef, Immediate, OpTy,
@@ -269,6 +271,7 @@ struct ConstPropagator<'mir, 'tcx> {
     source_scopes: IndexVec<SourceScope, SourceScopeData>,
     local_decls: IndexVec<Local, LocalDecl<'tcx>>,
     ret: Option<OpTy<'tcx, ()>>,
+    lint_root: Option<HirId>,
 }
 
 impl<'mir, 'tcx> LayoutOf for ConstPropagator<'mir, 'tcx> {
@@ -341,6 +344,7 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
             //FIXME(wesleywiser) we can't steal this because `Visitor::super_visit_body()` needs it
             local_decls: body.local_decls.clone(),
             ret: ret.map(Into::into),
+            lint_root: None,
         }
     }
 
@@ -373,13 +377,6 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
         F: FnOnce(&mut Self) -> InterpResult<'tcx, T>,
     {
         self.ecx.tcx.span = source_info.span;
-        // FIXME(eddyb) move this to the `Panic(_)` error case, so that
-        // `f(self)` is always called, and that the only difference when the
-        // scope's `local_data` is missing, is that the lint isn't emitted.
-        let lint_root = match &self.source_scopes[source_info.scope].local_data {
-            ClearCrossCrate::Set(data) => data.lint_root,
-            ClearCrossCrate::Clear => return None,
-        };
         let r = match f(self) {
             Ok(val) => Some(val),
             Err(error) => {
@@ -414,7 +411,7 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
                         diagnostic.report_as_lint(
                             self.ecx.tcx,
                             "this expression will panic at runtime",
-                            lint_root,
+                            self.lint_root?,
                             None,
                         );
                     }
@@ -431,13 +428,30 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
         c: &Constant<'tcx>,
     ) -> Option<Const<'tcx>> {
         self.ecx.tcx.span = c.span;
+
+        // FIXME we need to revisit this for #67176
+        if c.needs_subst() {
+            return None;
+        }
+
         match self.ecx.eval_const_to_op(c.literal, None) {
             Ok(op) => {
                 Some(op)
             },
             Err(error) => {
                 let err = error_to_const_error(&self.ecx, error);
-                err.report_as_error(self.ecx.tcx, "erroneous constant used");
+
+                if let ty::ConstKind::Unevaluated(_, _, Some(_)) = c.literal.val {
+                    err.report_as_lint(
+                        self.ecx.tcx,
+                        "erroneous constant used",
+                        self.lint_root?,
+                        Some(c.span),
+                    );
+                } else {
+                    err.report_as_error(self.ecx.tcx, "erroneous constant used");
+                }
+
                 None
             },
         }
@@ -469,6 +483,11 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
 
         // #66397: Don't try to eval into large places as that can cause an OOM
         if place_layout.size >= Size::from_bytes(MAX_ALLOC_LIMIT) {
+            return None;
+        }
+
+        // FIXME we need to revisit this for #67176
+        if rvalue.needs_subst() {
             return None;
         }
 
@@ -518,10 +537,6 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
                     let right_size = r.layout.size;
                     let r_bits = r.to_scalar().and_then(|r| r.to_bits(right_size));
                     if r_bits.map_or(false, |b| b >= left_bits as u128) {
-                        let lint_root = match &self.source_scopes[source_info.scope].local_data {
-                            ClearCrossCrate::Set(data) => data.lint_root,
-                            ClearCrossCrate::Clear => return None,
-                        };
                         let dir = if *op == BinOp::Shr {
                             "right"
                         } else {
@@ -529,7 +544,7 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
                         };
                         self.tcx.lint_hir(
                             ::rustc::lint::builtin::EXCEEDING_BITSHIFTS,
-                            lint_root,
+                            self.lint_root?,
                             span,
                             &format!("attempt to shift {} with overflow", dir));
                         return None;
@@ -699,7 +714,8 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
                 intern_const_alloc_recursive(
                     &mut self.ecx,
                     None,
-                    op.assert_mem_place()
+                    op.assert_mem_place(),
+                    false,
                 ).expect("failed to intern alloc");
                 true
             },
@@ -793,6 +809,10 @@ impl<'mir, 'tcx> MutVisitor<'tcx> for ConstPropagator<'mir, 'tcx> {
         location: Location,
     ) {
         trace!("visit_statement: {:?}", statement);
+        self.lint_root = match &self.source_scopes[statement.source_info.scope].local_data {
+            ClearCrossCrate::Set(data) => Some(data.lint_root),
+            ClearCrossCrate::Clear => None,
+        };
         if let StatementKind::Assign(box(ref place, ref mut rval)) = statement.kind {
             let place_ty: Ty<'tcx> = place
                 .ty(&self.local_decls, self.tcx)
@@ -849,6 +869,10 @@ impl<'mir, 'tcx> MutVisitor<'tcx> for ConstPropagator<'mir, 'tcx> {
     ) {
         self.super_terminator(terminator, location);
         let source_info = terminator.source_info;
+        self.lint_root = match &self.source_scopes[source_info.scope].local_data {
+            ClearCrossCrate::Set(data) => Some(data.lint_root),
+            ClearCrossCrate::Clear => None,
+        };
         match &mut terminator.kind {
             TerminatorKind::Assert { expected, ref msg, ref mut cond, .. } => {
                 if let Some(value) = self.eval_operand(&cond, source_info) {
@@ -860,10 +884,8 @@ impl<'mir, 'tcx> MutVisitor<'tcx> for ConstPropagator<'mir, 'tcx> {
                         // doesn't use the invalid value
                         match cond {
                             Operand::Move(ref place) | Operand::Copy(ref place) => {
-                                if let PlaceBase::Local(local) = place.base {
-                                    self.remove_const(local);
-                                }
-                            },
+                                self.remove_const(place.local);
+                            }
                             Operand::Constant(_) => {}
                         }
                         let span = terminator.source_info.span;

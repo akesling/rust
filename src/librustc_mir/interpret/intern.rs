@@ -45,6 +45,11 @@ struct InternVisitor<'rt, 'mir, 'tcx, M: CompileTimeMachine<'mir, 'tcx>> {
     /// despite the nested mutable reference!
     /// The field gets updated when an `UnsafeCell` is encountered.
     mutability: Mutability,
+
+    /// This flag is to avoid triggering UnsafeCells are not allowed behind references in constants
+    /// for promoteds.
+    /// It's a copy of `mir::Body`'s ignore_interior_mut_in_const_validation field
+    ignore_interior_mut_in_const_validation: bool,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Hash, Eq)]
@@ -180,13 +185,15 @@ for
                 // References we encounter inside here are interned as pointing to mutable
                 // allocations.
                 let old = std::mem::replace(&mut self.mutability, Mutability::Mutable);
-                assert_ne!(
-                    self.mode, InternMode::Const,
-                    "UnsafeCells are not allowed behind references in constants. This should have \
-                    been prevented statically by const qualification. If this were allowed one \
-                    would be able to change a constant at one use site and other use sites could \
-                    observe that mutation.",
-                );
+                if !self.ignore_interior_mut_in_const_validation {
+                    assert_ne!(
+                        self.mode, InternMode::Const,
+                        "UnsafeCells are not allowed behind references in constants. This should \
+                        have been prevented statically by const qualification. If this were \
+                        allowed one would be able to change a constant at one use site and other \
+                        use sites could observe that mutation.",
+                    );
+                }
                 let walked = self.walk_aggregate(mplace, fields);
                 self.mutability = old;
                 return walked;
@@ -207,10 +214,17 @@ for
                 self.ecx.tcx.struct_tail_erasing_lifetimes(
                     referenced_ty, self.ecx.param_env).kind
             {
-                if let Ok(vtable) = mplace.meta.unwrap().to_ptr() {
+                // Validation has already errored on an invalid vtable pointer so we can safely not
+                // do anything if this is not a real pointer
+                if let Scalar::Ptr(vtable) = mplace.meta.unwrap() {
                     // explitly choose `Immutable` here, since vtables are immutable, even
                     // if the reference of the fat pointer is mutable
                     self.intern_shallow(vtable.alloc_id, Mutability::Immutable, None)?;
+                } else {
+                    self.ecx().tcx.sess.delay_span_bug(
+                        syntax_pos::DUMMY_SP,
+                        "vtables pointers cannot be integer pointers",
+                    );
                 }
             }
             // Check if we have encountered this pointer+layout combination before.
@@ -279,6 +293,7 @@ pub fn intern_const_alloc_recursive<M: CompileTimeMachine<'mir, 'tcx>>(
     // The `mutability` of the place, ignoring the type.
     place_mut: Option<hir::Mutability>,
     ret: MPlaceTy<'tcx>,
+    ignore_interior_mut_in_const_validation: bool,
 ) -> InterpResult<'tcx> {
     let tcx = ecx.tcx;
     let (base_mutability, base_intern_mode) = match place_mut {
@@ -302,7 +317,9 @@ pub fn intern_const_alloc_recursive<M: CompileTimeMachine<'mir, 'tcx>>(
         ecx,
         leftover_allocations,
         base_intern_mode,
-        ret.ptr.to_ptr()?.alloc_id,
+        // The outermost allocation must exist, because we allocated it with
+        // `Memory::allocate`.
+        ret.ptr.assert_ptr().alloc_id,
         base_mutability,
         Some(ret.layout.ty)
     )?;
@@ -314,6 +331,7 @@ pub fn intern_const_alloc_recursive<M: CompileTimeMachine<'mir, 'tcx>>(
             mode,
             leftover_allocations,
             mutability,
+            ignore_interior_mut_in_const_validation,
         }.visit_value(mplace);
         if let Err(error) = interned {
             // This can happen when e.g. the tag of an enum is not a valid discriminant. We do have

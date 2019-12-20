@@ -500,12 +500,10 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
         place: &mir::Place<'tcx>,
         layout: Option<TyLayout<'tcx>>,
     ) -> InterpResult<'tcx, OpTy<'tcx, M::PointerTag>> {
-        use rustc::mir::PlaceBase;
-
-        let base_op = match &place.base {
-            PlaceBase::Local(mir::RETURN_PLACE) =>
+        let base_op = match place.local {
+            mir::RETURN_PLACE =>
                 throw_unsup!(ReadFromReturnPointer),
-            PlaceBase::Local(local) => {
+            local => {
                 // Do not use the layout passed in as argument if the base we are looking at
                 // here is not the entire place.
                 // FIXME use place_projection.is_empty() when is available
@@ -515,10 +513,7 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
                     None
                 };
 
-                self.access_local(self.frame(), *local, layout)?
-            }
-            PlaceBase::Static(place_static) => {
-                self.eval_static_to_mplace(&place_static)?.into()
+                self.access_local(self.frame(), local, layout)?
             }
         };
 
@@ -582,12 +577,20 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
         let val_val = match val.val {
             ty::ConstKind::Param(_) =>
                 throw_inval!(TooGeneric),
-            ty::ConstKind::Unevaluated(def_id, substs) => {
+            ty::ConstKind::Unevaluated(def_id, substs, promoted) => {
                 let instance = self.resolve(def_id, substs)?;
-                return Ok(OpTy::from(self.const_eval_raw(GlobalId {
+                let param_env = if self.tcx.is_static(def_id) {
+                    ty::ParamEnv::reveal_all()
+                } else {
+                    self.param_env
+                };
+                let val = self.tcx.const_eval(param_env.and(GlobalId {
                     instance,
-                    promoted: None,
-                })?));
+                    promoted,
+                }))?;
+                // "recurse". This is only ever going into a recusion depth of 1, because after
+                // `const_eval` we don't have `Unevaluated` anymore.
+                return self.eval_const_to_op(val, layout);
             }
             ty::ConstKind::Infer(..) |
             ty::ConstKind::Bound(..) |

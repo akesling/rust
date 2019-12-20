@@ -658,7 +658,7 @@ fn make_mirror_unadjusted<'a, 'tcx>(
                             // and not the beginning of discriminants (which is always `0`)
                             let substs = InternalSubsts::identity_for_item(cx.tcx(), did);
                             let lhs = mk_const(cx.tcx().mk_const(ty::Const {
-                                val: ty::ConstKind::Unevaluated(did, substs),
+                                val: ty::ConstKind::Unevaluated(did, substs, None),
                                 ty: var_ty,
                             }));
                             let bin = ExprKind::Binary {
@@ -898,7 +898,7 @@ fn convert_path_expr<'a, 'tcx>(
             debug!("convert_path_expr: (const) user_ty={:?}", user_ty);
             ExprKind::Literal {
                 literal: cx.tcx.mk_const(ty::Const {
-                    val: ty::ConstKind::Unevaluated(def_id, substs),
+                    val: ty::ConstKind::Unevaluated(def_id, substs, None),
                     ty: cx.tables().node_type(expr.hir_id),
                 }),
                 user_ty,

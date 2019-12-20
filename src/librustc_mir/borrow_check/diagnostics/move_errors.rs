@@ -248,9 +248,6 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, 'tcx> {
                    self.is_upvar_field_projection(original_path.as_ref()));
             (
                 match kind {
-                    IllegalMoveOriginKind::Static => {
-                        unreachable!();
-                    }
                     IllegalMoveOriginKind::BorrowedContent { target_place } => {
                         self.report_cannot_move_from_borrowed_content(
                             original_path,
@@ -284,7 +281,7 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, 'tcx> {
             format!("static item `{}`", self.describe_place(place.as_ref()).unwrap())
         } else {
             let base_static = PlaceRef {
-                base: &place.base,
+                local: &place.local,
                 projection: &[ProjectionElem::Deref],
             };
 
@@ -315,7 +312,7 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, 'tcx> {
         let deref_base = match deref_target_place.projection.as_ref() {
             &[ref proj_base @ .., ProjectionElem::Deref] => {
                 PlaceRef {
-                    base: &deref_target_place.base,
+                    local: &deref_target_place.local,
                     projection: &proj_base,
                 }
             }
@@ -323,7 +320,7 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, 'tcx> {
         };
 
         if let PlaceRef {
-            base: PlaceBase::Local(local),
+            local,
             projection: [],
         } = deref_base {
             let decl = &self.body.local_decls[*local];

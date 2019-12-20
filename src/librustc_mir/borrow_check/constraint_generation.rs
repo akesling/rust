@@ -2,7 +2,7 @@ use rustc::infer::InferCtxt;
 use rustc::mir::visit::TyContext;
 use rustc::mir::visit::Visitor;
 use rustc::mir::{
-    BasicBlock, BasicBlockData, Body, Local, Location, Place, PlaceBase, PlaceRef, ProjectionElem,
+    BasicBlock, BasicBlockData, Body, Local, Location, Place, PlaceRef, ProjectionElem,
     Rvalue, SourceInfo, Statement, StatementKind, Terminator, TerminatorKind, UserTypeProjection,
 };
 use rustc::ty::fold::TypeFoldable;
@@ -20,7 +20,6 @@ use crate::borrow_check::{
 
 pub(super) fn generate_constraints<'cx, 'tcx>(
     infcx: &InferCtxt<'cx, 'tcx>,
-    param_env: ty::ParamEnv<'tcx>,
     liveness_constraints: &mut LivenessValues<RegionVid>,
     all_facts: &mut Option<AllFacts>,
     location_table: &LocationTable,
@@ -34,7 +33,6 @@ pub(super) fn generate_constraints<'cx, 'tcx>(
         location_table,
         all_facts,
         body,
-        param_env,
     };
 
     for (bb, data) in body.basic_blocks().iter_enumerated() {
@@ -45,7 +43,6 @@ pub(super) fn generate_constraints<'cx, 'tcx>(
 /// 'cg = the duration of the constraint generation process itself.
 struct ConstraintGeneration<'cg, 'cx, 'tcx> {
     infcx: &'cg InferCtxt<'cx, 'tcx>,
-    param_env: ty::ParamEnv<'tcx>,
     all_facts: &'cg mut Option<AllFacts>,
     location_table: &'cg LocationTable,
     liveness_constraints: &'cg mut LivenessValues<RegionVid>,
@@ -220,11 +217,11 @@ impl<'cx, 'cg, 'tcx> ConstraintGeneration<'cx, 'cg, 'tcx> {
             //   conflicts with the `place`.
             match place.as_ref() {
                 PlaceRef {
-                    base: &PlaceBase::Local(local),
+                    local,
                     projection: &[],
                 } |
                 PlaceRef {
-                    base: &PlaceBase::Local(local),
+                    local,
                     projection: &[ProjectionElem::Deref],
                 } => {
                     debug!(
@@ -236,20 +233,13 @@ impl<'cx, 'cg, 'tcx> ConstraintGeneration<'cx, 'cg, 'tcx> {
                         all_facts,
                         self.borrow_set,
                         self.location_table,
-                        &local,
+                        local,
                         location,
                     );
                 }
 
                 PlaceRef {
-                    base: &PlaceBase::Static(_),
-                    ..
-                } => {
-                    // Ignore kills of static or static mut variables.
-                }
-
-                PlaceRef {
-                    base: &PlaceBase::Local(local),
+                    local,
                     projection: &[.., _],
                 } => {
                     // Kill conflicting borrows of the innermost local.
@@ -259,11 +249,10 @@ impl<'cx, 'cg, 'tcx> ConstraintGeneration<'cx, 'cg, 'tcx> {
                         local, location
                     );
 
-                    if let Some(borrow_indices) = self.borrow_set.local_map.get(&local) {
+                    if let Some(borrow_indices) = self.borrow_set.local_map.get(local) {
                         for &borrow_index in borrow_indices {
                             let places_conflict = places_conflict::places_conflict(
                                 self.infcx.tcx,
-                                self.param_env,
                                 self.body,
                                 &self.borrow_set.borrows[borrow_index].borrowed_place,
                                 place,

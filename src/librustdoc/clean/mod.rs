@@ -1534,11 +1534,11 @@ impl<'tcx> Clean<Type> for Ty<'tcx> {
             ty::Slice(ty) => Slice(box ty.clean(cx)),
             ty::Array(ty, n) => {
                 let mut n = cx.tcx.lift(&n).expect("array lift failed");
-                if let ty::ConstKind::Unevaluated(def_id, substs) = n.val {
+                if let ty::ConstKind::Unevaluated(def_id, substs, promoted) = n.val {
                     let param_env = cx.tcx.param_env(def_id);
                     let cid = GlobalId {
                         instance: ty::Instance::new(def_id, substs),
-                        promoted: None
+                        promoted,
                     };
                     if let Ok(new_n) = cx.tcx.const_eval(param_env.and(cid)) {
                         n = new_n;

@@ -249,7 +249,6 @@ pub(in crate::borrow_check) fn compute_regions<'cx, 'tcx>(
 
     constraint_generation::generate_constraints(
         infcx,
-        param_env,
         &mut liveness_constraints,
         &mut all_facts,
         location_table,
@@ -273,7 +272,6 @@ pub(in crate::borrow_check) fn compute_regions<'cx, 'tcx>(
     // Generate various additional constraints.
     invalidation::generate_invalidates(
         infcx.tcx,
-        param_env,
         &mut all_facts,
         location_table,
         body,
